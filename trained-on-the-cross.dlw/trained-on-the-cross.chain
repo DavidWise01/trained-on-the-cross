@@ -1,0 +1,9 @@
+ROOT0-DLW-CHAIN-v1
+index : 1224
+slug  : trained-on-the-cross
+seal  : b47f3ff41e3f308bb18429fc858badb03bc5ce047173abedcf01375f3158b567
+prev  : baebad21cfc6f6a26c385d061597377eb08f2e978d8b0a75008617178176a048
+link  : 41c3f19f96aa8e9e19c77a7af0dbf9e3987c6f47627668f523a4c2c9f5061e41
+head  : 41c3f19f96aa8e9e19c77a7af0dbf9e3987c6f47627668f523a4c2c9f5061e41
+
+— the tether: link = sha256(index|slug|seal|prev). the chain head commits to the whole corpus.
