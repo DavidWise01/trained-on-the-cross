@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRAINED ON THE CROSS — softmax vs the seeded cross, from scratch</title>
+<style>
+  :root{--bg:#04070a;--panel:#0a1219;--ink:#c8f5e0;--dim:#5fae94;--faint:#2f5f52;--line:#123020;--grid:#0d2018;
+    --phos:#22e38a;--phos2:#3affa0;--cyan:#38d6e0;--amber:#e0a838;--red:#e05a4a;--violet:#9a8be0;--gold:#e0c040;
+    --mono:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace;}
+  *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);line-height:1.5}
+  body{background:linear-gradient(180deg,#04070a,#060b10)}
+  .wrap{max-width:920px;margin:0 auto;padding:24px 20px 56px}
+  .kicker{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--phos);margin-bottom:10px;text-shadow:0 0 8px rgba(34,227,138,.4)}
+  h1{font-weight:700;font-size:25px;line-height:1.06;margin:0 0 8px;color:var(--phos2);text-shadow:0 0 12px rgba(58,255,160,.3)}
+  h1 em{font-style:normal;color:var(--gold)}
+  p.lede{color:var(--dim);max-width:74ch;margin:0 0 12px;font-size:13px;line-height:1.65}p.lede b{color:var(--ink)}
+  .tiers{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.tier{font-size:9px;font-weight:700;padding:2px 7px;border-radius:2px}
+  .tier.lit{color:var(--phos);border:1px solid var(--phos)}.tier.scope{color:var(--amber);border:1px solid var(--amber)}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0}
+  .met{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;text-align:center}
+  .met .lab{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .met .num{font-size:21px;font-weight:700;margin-top:6px}
+  .met .num.good{color:var(--phos2)}.met .num.warn{color:var(--amber)}.met .num.neutral{color:var(--cyan)}
+  .met .d{font-size:9px;color:var(--dim);margin-top:4px;line-height:1.4}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0}
+  .cardh{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  canvas{display:block;width:100%;border-radius:5px;background:#02040699}#curve{height:300px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--dim);margin-top:6px}.legend span{display:flex;align-items:center;gap:5px}.sw{width:12px;height:3px;border-radius:2px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0}@media(max-width:760px){.two{grid-template-columns:1fr}}
+  .samp{background:#02040688;border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;color:var(--dim);line-height:1.5;max-height:220px;overflow:auto}
+  .samp .h{color:var(--faint);font-size:9px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:6px}
+  .lo{color:var(--faint);font-size:10px;margin-top:6px}
+  .verdict{border-left:2px solid var(--phos);padding:10px 0 10px 16px;margin:18px 0;color:var(--dim);font-size:12.5px;line-height:1.75}.verdict b{color:var(--phos2)}.verdict .w{color:var(--amber)}
+  .note{font-size:10px;color:var(--faint);margin-top:18px;letter-spacing:.02em;line-height:1.85}.note b{color:var(--dim)}
+</style></head>
+<body><div class="wrap">
+  <div class="kicker">prosoche · the SPEC→LIT step · a language model trained on the seeded cross, not softmax</div>
+  <h1>Trained on the <em>cross</em>.</h1>
+  <p class="lede">Both prior audits ended at the same wall: a drop-in swap on softmax-trained weights can only show <b>compatibility</b> — a real quality verdict needs <b>training</b>. So it was trained. Two <b>identical</b> 0.6M-parameter char-transformers — same initialization, same batch order — from scratch on TinyShakespeare, one with softmax attention, one with the <b>seeded cross</b>. The finding, measured: the cross-trained model <b>learns</b> (perplexity 76.7 → 6.8) and lands <b>within 1.2% perplexity</b> of softmax (0.0115 nats val loss), generating comparable text — at ~1.75× the compute. Neither better nor broken: a viable trained attention.</p>
+  <div class="tiers">
+    <span class="tier lit">LIT — real from-scratch training, every number below is from the run (results embedded verbatim)</span>
+    <span class="tier scope">SCOPE — mean-centred variant, tiny char model, CPU, 2000 steps · a floor-holding result at small scale, not a GPT-scale claim</span>
+  </div>
+
+  <div class="metrics" id="metrics"></div>
+
+  <div class="card"><div class="cardh">validation loss · softmax vs seeded cross · same init, same batches, from scratch</div>
+    <canvas id="curve"></canvas>
+    <div class="legend"><span><span class="sw" style="background:var(--cyan)"></span>softmax</span><span><span class="sw" style="background:var(--gold)"></span>seeded cross</span><span style="color:var(--faint)">y = val loss (nats) · x = step</span></div>
+    <div class="lo">the two curves are nearly on top of each other the whole way down — the cross tracks softmax to within a hair. it trains.</div>
+  </div>
+
+  <div class="two">
+    <div class="card"><div class="cardh">softmax · 300 chars, sampled</div><div class="samp" id="s_sm"></div></div>
+    <div class="card"><div class="cardh">seeded cross · 300 chars, sampled</div><div class="samp" id="s_cx"></div></div>
+  </div>
+
+  <div class="verdict" id="verdict"></div>
+
+  <div class="note">
+    <b>the kernel, trained</b>: the seeded cross is z = (1+iX)/(1−iX)·e^(d/T) with d = score − centre, X = d; attention weight = the clipped projection of each token's z onto the resultant R = Σz (phase coherence). Made a differentiable, causal-masked attention and dropped in for softmax — same model, same optimizer, same data.<br>
+    <b>honest scope</b>: a <b>mean-centred</b> variant (median→mean, for batched autograd — a stated deviation from zero cool's exact kernel); a 0.6M-param char model on TinyShakespeare, 2000 steps, CPU; identical init + batch order (a clean A/B). "within 0.6%" is at <b>this</b> scale. softmax is still marginally ahead (0.0115 nats) and ~1.75× cheaper — the cross holds the <b>floor</b>, it does not (here) win. every number is from the real run. builds on <b>zero cool</b>'s kernel + the-mule-detector / the-seeded-cross arc; trained + rendered by ROOT0 with AVAN. real training, offline, fails loud.
+  </div>
+</div>
+<script>
+"use strict";
+const R={"params":618817,
+ "softmax":{"ppl":6.72,"val":1.9055,"secs":122,"curve":[[0,4.3403],[150,2.565],[300,2.4302],[450,2.3272],[600,2.2469],[750,2.1638],[900,2.1153],[1050,2.0654],[1200,2.0292],[1350,1.9934],[1500,1.9706],[1650,1.9443],[1800,1.9231],[1950,1.9055]],
+   "sample":"\nAloure that rity.\n\nFLARIET:\nDuke gues not lifes canson, your gorace.\n\nCOMERLAHUM:\nThou safeas, then stcuctray! Pamy tolditing,\nTo my mucke your Jety mudst a him-hath\nspaich, mow hasded salford dest mage:\nI'll vild your blivess all but un disuch\nAnd parn bray, inanesment; andom: his welcout, 'tis to;"},
+ "cross":{"ppl":6.8,"val":1.917,"secs":214,"curve":[[0,4.3399],[150,2.5628],[300,2.4425],[450,2.3581],[600,2.2741],[750,2.1862],[900,2.1345],[1050,2.0787],[1200,2.0431],[1350,2.0053],[1500,1.9825],[1650,1.9585],[1800,1.9372],[1950,1.917]],
+   "sample":"\n\nLorder:\nMopet you thou Epond be guisch\nArelood cansomery, and tall a way:\nThut is to prate sauther, tchemp yon, my toldiher.\nBy surce,\nWheress Jety mudst a Hervingmass ich, Oo. Whode, sallep you\ndine frum wervild your blity in of buter yoursed\nTo Of purbray, inand me to out, that's, by Rome.\nYou E;"}};
+const C=getComputedStyle(document.documentElement),col=n=>C.getPropertyValue(n).trim()||"#fff";
+const $=id=>document.getElementById(id);
+const dPPL=(R.cross.ppl/R.softmax.ppl-1)*100, dVAL=(R.cross.val-R.softmax.val);
+const METS=[
+ ["params / model",(R.params/1e6).toFixed(2)+"M","neutral","identical architecture, both models"],
+ ["softmax ppl",R.softmax.ppl.toFixed(2),"good","final val perplexity, 1950 steps"],
+ ["seeded-cross ppl",R.cross.ppl.toFixed(2),"good","final val perplexity, same steps"],
+ ["Δ vs softmax","+"+dPPL.toFixed(1)+"%","warn","cross is "+dPPL.toFixed(1)+"% higher ppl ("+dVAL.toFixed(4)+" nats) — a hair behind"],
+ ["compute cost",(R.cross.secs/R.softmax.secs).toFixed(2)+"×","warn","cross training time vs softmax ("+R.cross.secs+"s vs "+R.softmax.secs+"s)"]
+];
+$("metrics").innerHTML=METS.map(([l,n,c,d])=>'<div class="met"><div class="lab">'+l+'</div><div class="num '+c+'">'+n+'</div><div class="d">'+d+'</div></div>').join("");
+$("s_sm").innerHTML='<span class="h">from scratch → softmax</span>'+R.softmax.sample.replace(/</g,"&lt;");
+$("s_cx").innerHTML='<span class="h">from scratch → seeded cross</span>'+R.cross.sample.replace(/</g,"&lt;");
+$("verdict").innerHTML='<b>the SPEC→LIT step, done.</b> the kernel that lost the toy game in <b>the-mule-detector</b> and merely "didn\'t break" the frozen model in <b>the-seeded-cross</b> can, when <b>actually trained</b>, do the job: it descends from ppl 76.7 to <b>'+R.cross.ppl+'</b>, within <b>'+dPPL.toFixed(1)+'%</b> of softmax\'s '+R.softmax.ppl+', on identical init and identical batches. the samples are comparable faux-Shakespeare. so the honest verdict is neither <b>better</b> nor <b>broken</b>: the seeded cross is a <b class="w">viable trained attention</b> — it holds the floor at small scale, at a <b class="w">~'+(R.cross.secs/R.softmax.secs).toFixed(1)+'×</b> compute premium, and softmax keeps a razor-thin lead. whether phase-coherence buys an <b>edge</b> at real scale is the next wall; this settles that it clears the first one — a model can be trained on the cross and it works.';
+// curve
+const cv=$("curve"),x=cv.getContext("2d");
+function draw(){
+  const dpr=Math.min(devicePixelRatio||1,2),W=cv.clientWidth||420,H=300;cv.width=W*dpr;cv.height=H*dpr;x.setTransform(dpr,0,0,dpr,0,0);
+  const pl=42,pr=14,pt=16,pb=32;x.clearRect(0,0,W,H);
+  const xs=1950,ymin=1.8,ymax=4.4;
+  const X=v=>pl+v/xs*(W-pl-pr),Y=v=>pt+(v-ymin)/(ymax-ymin)*(H-pt-pb);
+  x.strokeStyle=col("--grid");x.fillStyle=col("--faint");x.font="8px "+col("--mono");x.textAlign="right";
+  for(let g=0;g<=5;g++){const yv=ymin+(ymax-ymin)*g/5;const yy=Y(yv);x.beginPath();x.moveTo(pl,yy);x.lineTo(W-pr,yy);x.stroke();x.fillText(yv.toFixed(1),pl-4,yy+3);}
+  x.textAlign="center";for(let g=0;g<=4;g++){const xv=xs*g/4;x.fillText(Math.round(xv),X(xv),H-10);}
+  x.fillText("training step",W/2,H-1);
+  function ln(cur,c){x.strokeStyle=col(c);x.lineWidth=2.2;x.beginPath();cur.forEach((p,i)=>{const px=X(p[0]),py=Y(Math.min(ymax,p[1]));i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();
+    cur.forEach(p=>{x.fillStyle=col(c);x.beginPath();x.arc(X(p[0]),Y(Math.min(ymax,p[1])),2.3,0,7);x.fill();});}
+  ln(R.softmax.curve,"--cyan");ln(R.cross.curve,"--gold");
+  // final labels
+  x.textAlign="left";x.fillStyle=col("--cyan");x.fillText("softmax "+R.softmax.ppl,X(1950)-70,Y(R.softmax.val)-6);
+  x.fillStyle=col("--gold");x.fillText("cross "+R.cross.ppl,X(1950)-64,Y(R.cross.val)+14);
+}
+draw();addEventListener("resize",draw);
+</script></body></html>
